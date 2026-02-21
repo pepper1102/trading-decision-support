@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}ダッシュボード - 株売買支援システム{% endblock %}
+
+{% block content %}
+<div class="row mb-3 align-items-end">
+  <div class="col">
+    <h2><i class="bi bi-speedometer2"></i> ダッシュボード</h2>
+    <span class="text-muted small">監視銘柄: <strong>{{ total }}</strong> 銘柄</span>
+    {% if last_updated %}
+    <span class="text-muted small ms-3"><i class="bi bi-clock"></i> 最終更新: {{ last_updated }}</span>
+    {% endif %}
+  </div>
+</div>
+
+{% if error %}
+<div class="alert alert-warning">
+  <i class="bi bi-exclamation-triangle"></i> {{ error }}
+</div>
+{% endif %}
+
+{% if summary %}
+<div class="row g-4">
+  <!-- 短期スイング -->
+  <div class="col-12 col-md-4">
+    <div class="card h-100 border-primary">
+      <div class="card-header bg-primary text-white">
+        <i class="bi bi-lightning-charge"></i> 短期（<span
+          class="border-bottom border-white-subtle"
+          style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-placement="bottom"
+          data-bs-title="数日〜2週間の値幅を狙う短期売買手法。テクニカル指標で売買タイミングを判断します。">スイング</span>）<small class="opacity-75 ms-2">数日〜2週間</small>
+      </div>
+      <div class="card-body">
+        <div class="d-flex justify-content-around text-center">
+          <div>
+            <a href="/candidates?strategy=swing&signal=buy" class="text-decoration-none">
+              <div class="display-6 text-success fw-bold summary-count">{{ summary.get('swing', {}).get('buy', 0) }}</div>
+              <div class="text-muted small summary-label">買い候補</div>
+            </a>
+          </div>
+          <div>
+            <a href="/candidates?strategy=swing&signal=sell" class="text-decoration-none">
+              <div class="display-6 text-danger fw-bold summary-count">{{ summary.get('swing', {}).get('sell', 0) }}</div>
+              <div class="text-muted small summary-label">売り候補</div>
+            </a>
+          </div>
+          <div>
+            <a href="/candidates?strategy=swing&signal=hold" class="text-decoration-none">
+              <div class="display-6 text-secondary fw-bold summary-count">{{ summary.get('swing', {}).get('hold', 0) }}</div>
+              <div class="text-muted small summary-label">様子見</div>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <div class="d-flex gap-2">
+          <a href="/candidates?strategy=swing&signal=buy" class="btn btn-sm btn-success flex-fill">
+            <i class="bi bi-arrow-up-circle"></i> 買い一覧
+          </a>
+          <a href="/candidates?strategy=swing&signal=sell" class="btn btn-sm btn-danger flex-fill">
+            <i class="bi bi-arrow-down-circle"></i> 売り一覧
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 中長期ファンダ -->
+  <div class="col-12 col-md-4">
+    <div class="card h-100 border-info">
+      <div class="card-header bg-info text-white">
+        <i class="bi bi-bar-chart"></i> 中長期（<span
+          class="border-bottom border-white-subtle"
+          style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-placement="bottom"
+          data-bs-title="企業の業績・財務・成長性などの基礎情報（ファンダメンタルズ）を重視した投資手法。PER・PBRなどの指標で割安さを見ます。">ファンダ</span>）<small class="opacity-75 ms-2">3ヶ月〜1年</small>
+      </div>
+      <div class="card-body">
+        <div class="d-flex justify-content-around text-center">
+          <div>
+            <a href="/candidates?strategy=fundamental&signal=buy" class="text-decoration-none">
+              <div class="display-6 text-success fw-bold summary-count">{{ summary.get('fundamental', {}).get('buy', 0) }}</div>
+              <div class="text-muted small summary-label">買い候補</div>
+            </a>
+          </div>
+          <div>
+            <a href="/candidates?strategy=fundamental&signal=sell" class="text-decoration-none">
+              <div class="display-6 text-danger fw-bold summary-count">{{ summary.get('fundamental', {}).get('sell', 0) }}</div>
+              <div class="text-muted small summary-label">売り候補</div>
+            </a>
+          </div>
+          <div>
+            <a href="/candidates?strategy=fundamental&signal=hold" class="text-decoration-none">
+              <div class="display-6 text-secondary fw-bold summary-count">{{ summary.get('fundamental', {}).get('hold', 0) }}</div>
+              <div class="text-muted small summary-label">様子見</div>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <div class="d-flex gap-2">
+          <a href="/candidates?strategy=fundamental&signal=buy" class="btn btn-sm btn-success flex-fill">
+            <i class="bi bi-arrow-up-circle"></i> 買い一覧
+          </a>
+          <a href="/candidates?strategy=fundamental&signal=sell" class="btn btn-sm btn-danger flex-fill">
+            <i class="bi bi-arrow-down-circle"></i> 売り一覧
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 配当重視 -->
+  <div class="col-12 col-md-4">
+    <div class="card h-100 border-warning">
+      <div class="card-header bg-warning text-dark">
+        <i class="bi bi-cash-coin"></i> 配当重視（<span
+          class="border-bottom border-dark-subtle"
+          style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-placement="bottom"
+          data-bs-title="株を長期保有して配当金を受け取ることを重視する投資スタイル。配当利回りが高い銘柄を中心に選定します。">インカム</span>）<small class="opacity-75 ms-2">1年以上</small>
+      </div>
+      <div class="card-body">
+        <div class="d-flex justify-content-around text-center">
+          <div>
+            <a href="/candidates?strategy=dividend&signal=buy" class="text-decoration-none">
+              <div class="display-6 text-success fw-bold summary-count">{{ summary.get('dividend', {}).get('buy', 0) }}</div>
+              <div class="text-muted small summary-label">買い候補</div>
+            </a>
+          </div>
+          <div>
+            <a href="/candidates?strategy=dividend&signal=sell" class="text-decoration-none">
+              <div class="display-6 text-danger fw-bold summary-count">{{ summary.get('dividend', {}).get('sell', 0) }}</div>
+              <div class="text-muted small summary-label">売り候補</div>
+            </a>
+          </div>
+          <div>
+            <a href="/candidates?strategy=dividend&signal=hold" class="text-decoration-none">
+              <div class="display-6 text-secondary fw-bold summary-count">{{ summary.get('dividend', {}).get('hold', 0) }}</div>
+              <div class="text-muted small summary-label">様子見</div>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <div class="d-flex gap-2">
+          <a href="/candidates?strategy=dividend&signal=buy" class="btn btn-sm btn-success flex-fill">
+            <i class="bi bi-arrow-up-circle"></i> 買い一覧
+          </a>
+          <a href="/candidates?strategy=dividend&signal=sell" class="btn btn-sm btn-danger flex-fill">
+            <i class="bi bi-arrow-down-circle"></i> 売り一覧
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 価格帯別クイックフィルタ -->
+<div class="row mt-4">
+  <div class="col">
+    <h5><i class="bi bi-funnel"></i> 価格帯クイックフィルタ <small class="text-muted fw-normal fs-6">（スイング買い）</small></h5>
+    <div class="d-flex gap-2 flex-wrap mt-2">
+      <a href="/candidates?strategy=swing&signal=buy&price_max=1000" class="btn btn-sm btn-outline-primary">〜1,000円</a>
+      <a href="/candidates?strategy=swing&signal=buy&price_min=1000&price_max=3000" class="btn btn-sm btn-outline-primary">1,000〜3,000円</a>
+      <a href="/candidates?strategy=swing&signal=buy&price_min=3000&price_max=10000" class="btn btn-sm btn-outline-primary">3,000〜10,000円</a>
+      <a href="/candidates?strategy=swing&signal=buy&price_min=10000" class="btn btn-sm btn-outline-primary">10,000円〜</a>
+    </div>
+  </div>
+</div>
+
+<!-- 使い方 -->
+<div class="row mt-4">
+  <div class="col">
+    <div class="alert alert-info mb-0">
+      <h6 class="alert-heading"><i class="bi bi-info-circle"></i> 使い方</h6>
+      <ul class="mb-0 small">
+        <li><strong>watchlist.txt</strong> に監視したい銘柄コードを追加してください（1行1コード）</li>
+        <li>買い/売り候補一覧では各銘柄の判定根拠が確認できます</li>
+        <li>銘柄名をクリックすると詳細ページで全ルールの判定結果を確認できます</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 用語メモ -->
+<div class="row mt-3">
+  <div class="col">
+    <div class="alert alert-light border mb-0 py-2">
+      <h6 class="alert-heading mb-2"><i class="bi bi-question-circle"></i> 用語メモ <small class="text-muted fw-normal fs-6">（用語にカーソルを当てると解説が表示されます）</small></h6>
+      <div class="small d-flex flex-wrap gap-3">
+        <span class="text-decoration-underline text-decoration-dotted" style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-title="年間配当金 ÷ 株価（%）。数値が高いほど配当収入の効率が良いことを示す指標。">配当利回り</span>
+        <span class="text-decoration-underline text-decoration-dotted" style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-title="株価 ÷ 1株当たり利益（EPS）。利益に対して株価が割高か割安かを示す指標。一般に低いほど割安とされる。">PER</span>
+        <span class="text-decoration-underline text-decoration-dotted" style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-title="株価 ÷ 1株当たり純資産（BPS）。純資産に対する株価の水準を示す指標。1倍を下回ると理論上は割安とされる。">PBR</span>
+        <span class="text-decoration-underline text-decoration-dotted" style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-title="企業の業績・財務・事業内容・成長性など、株価の基礎となる情報のこと。">ファンダメンタル</span>
+        <span class="text-decoration-underline text-decoration-dotted" style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-title="チャートや出来高などの市場データをもとに売買タイミングを判断する分析手法。スイング戦略の主な根拠。">テクニカル指標</span>
+        <span class="text-decoration-underline text-decoration-dotted" style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-title="株を保有することで得られる配当金・利子などの収益。キャピタルゲイン（値上がり益）とは対になる概念。">インカムゲイン</span>
+        <span class="text-decoration-underline text-decoration-dotted" style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-title="移動平均線（Moving Average）の25日版。過去25営業日の終値の平均を線で結んだもの。株価がこの線を上抜けると上昇トレンドのサイン、下抜けると下落トレンドのサインとされる。">MA25</span>
+        <span class="text-decoration-underline text-decoration-dotted" style="cursor:help;"
+          data-bs-toggle="tooltip"
+          data-bs-title="1日の取引で最後に成立した株価。チャートのローソク足では終値・始値・高値・安値の4本値が使われ、終値が最も重要視される。">終値</span>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

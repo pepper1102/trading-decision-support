@@ -1,0 +1,18 @@
+# 環境変数・シークレット
+.env
+
+# ローカルDB
+local.db
+local.db-shm
+local.db-wal
+
+# Pythonキャッシュ
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code設定（個人用）
+.claude/
+
+# 個人の監視銘柄リスト
+watchlist.txt

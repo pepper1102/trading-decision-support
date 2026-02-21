@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} ({{ code }}) - 詳細{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+  <div class="col">
+    <nav aria-label="breadcrumb">
+      <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/">ダッシュボード</a></li>
+        <li class="breadcrumb-item active">{{ name }}</li>
+      </ol>
+    </nav>
+    <h2>{{ name }} <small class="text-muted fs-5">{{ code }}</small></h2>
+  </div>
+</div>
+
+<!-- 戦略別シグナルサマリー（swing → fundamental → dividend 順） -->
+<div class="row g-3 mb-4">
+  {% for strategy_key, judgment in judgments.items() %}
+  <div class="col-12 col-md-4">
+    <div class="card text-center
+      {% if judgment.signal == 'buy' %}border-success
+      {% elif judgment.signal == 'sell' %}border-danger
+      {% else %}border-secondary{% endif %}">
+      <div class="card-header
+        {% if judgment.signal == 'buy' %}bg-success text-white
+        {% elif judgment.signal == 'sell' %}bg-danger text-white
+        {% else %}bg-secondary text-white{% endif %}">
+        {% if strategy_key == 'swing' %}<i class="bi bi-lightning-charge"></i> 短期（スイング）
+        {% elif strategy_key == 'fundamental' %}<i class="bi bi-bar-chart"></i> 中長期（ファンダ）
+        {% else %}<i class="bi bi-cash-coin"></i> 配当重視{% endif %}
+      </div>
+      <div class="card-body py-3">
+        <div class="display-5 fw-bold
+          {% if judgment.signal == 'buy' %}text-success
+          {% elif judgment.signal == 'sell' %}text-danger
+          {% else %}text-secondary{% endif %}">
+          {% if judgment.signal == 'buy' %}<i class="bi bi-arrow-up-circle"></i> 買い
+          {% elif judgment.signal == 'sell' %}<i class="bi bi-arrow-down-circle"></i> 売り
+          {% else %}<i class="bi bi-dash-circle"></i> 様子見{% endif %}
+        </div>
+        <div class="mt-2">
+          <div class="progress" style="height: 8px;">
+            <div class="progress-bar
+              {% if judgment.score >= 0.7 %}bg-success{% elif judgment.score >= 0.5 %}bg-warning{% else %}bg-danger{% endif %}"
+              style="width: {{ (judgment.score * 100)|int }}%"></div>
+          </div>
+          <div class="text-muted small mt-1">スコア: {{ "{:.0f}".format(judgment.score * 100) }}%</div>
+        </div>
+        {% if judgment.price %}
+        <div class="mt-2 fs-5 fw-semibold">
+          {{ "{:,.0f}".format(judgment.price) }}円
+          <span class="text-muted small fw-normal">（{{ judgment.as_of }}）</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- 価格チャート（MA5・MA25・出来高付き） -->
+{% if chart_labels %}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-graph-up"></i> 価格推移（直近30営業日）</span>
+    <span class="text-muted small">
+      <span class="legend-dot" style="background:#0d6efd"></span> 終値
+      <span class="legend-dot ms-2" style="background:#fd7e14"></span> MA5
+      <span class="legend-dot ms-2" style="background:#dc3545"></span> MA25
+      <span class="legend-dot ms-2" style="background:rgba(108,117,125,0.5)"></span> 出来高
+    </span>
+  </div>
+  <div class="card-body">
+    <canvas id="priceChart" style="max-height:320px;"></canvas>
+  </div>
+</div>
+{% endif %}
+
+<!-- 直近1ヶ月ニュース -->
+{% if news_items %}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-newspaper"></i> 直近1ヶ月ニュース</span>
+    <span class="text-muted small">{{ news_items|length }}件</span>
+  </div>
+  <div class="card-body p-3">
+    <div class="d-flex flex-column gap-2">
+      {% for n in news_items %}
+      <article class="news-card news-{{ n.sentiment_tone }}">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <a href="{{ n.url }}" target="_blank" rel="noopener noreferrer" class="news-title">
+            {{ n.title }}
+          </a>
+          <span class="badge news-score flex-shrink-0
+            {% if n.sentiment_tone == 'positive' %}bg-success
+            {% elif n.sentiment_tone == 'negative' %}bg-danger
+            {% else %}bg-secondary{% endif %}">
+            {{ "{:+.2f}".format(n.sentiment_score) }}
+          </span>
+        </div>
+        {% if n.summary %}
+        <p class="news-summary mb-1">{{ n.summary }}</p>
+        {% endif %}
+        <div class="text-muted small mt-1">
+          <i class="bi bi-calendar3"></i> {{ n.published_at[:10] }}
+          &nbsp;／&nbsp;
+          <i class="bi bi-globe"></i> {{ n.source }}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- 戦略別ルール判定詳細（swing → fundamental → dividend 順） -->
+<div class="row g-4">
+  {% for strategy_key, judgment in judgments.items() %}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>
+          {% if strategy_key == 'swing' %}<i class="bi bi-lightning-charge text-primary"></i> 短期（スイング）ルール判定
+          {% elif strategy_key == 'fundamental' %}<i class="bi bi-bar-chart text-info"></i> 中長期（ファンダ）ルール判定
+          {% else %}<i class="bi bi-cash-coin text-warning"></i> 配当重視ルール判定{% endif %}
+        </span>
+        <span class="badge
+          {% if judgment.signal == 'buy' %}bg-success
+          {% elif judgment.signal == 'sell' %}bg-danger
+          {% else %}bg-secondary{% endif %}">
+          スコア {{ "{:.0f}".format(judgment.score * 100) }}%
+        </span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>ルール名</th>
+                <th class="text-end">判定値</th>
+                <th class="text-muted">閾値・基準</th>
+                <th class="text-center">判定</th>
+                <th class="text-center text-muted small">重み</th>
+                <th>理由</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in judgment.rule_results %}
+              <tr class="{% if r.passed %}table-success{% else %}table-danger{% endif %}">
+                <td class="fw-semibold">{{ r.rule_name }}</td>
+                <td class="text-end">
+                  {% if r.value is not none %}{{ "{:.2f}".format(r.value) }}{% else %}—{% endif %}
+                </td>
+                <td class="text-muted small">{{ r.threshold }}</td>
+                <td class="text-center">
+                  {% if r.passed %}
+                    <i class="bi bi-check-circle-fill text-success fs-5"></i>
+                  {% else %}
+                    <i class="bi bi-x-circle-fill text-danger fs-5"></i>
+                  {% endif %}
+                </td>
+                <td class="text-center text-muted small">
+                  {% set w = r.weight | default(1.0) %}
+                  {% if w != 1.0 %}
+                    <span class="badge bg-light text-dark border">×{{ "{:.1f}".format(w) }}</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="small">{{ r.reason }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if chart_labels %}
+<script>
+(function () {
+  function calcMA(data, period) {
+    return data.map((_, i) => {
+      if (i < period - 1) return null;
+      const slice = data.slice(i - period + 1, i + 1);
+      return slice.reduce((a, b) => a + b, 0) / period;
+    });
+  }
+
+  const labels  = {{ chart_labels  | tojson }};
+  const closes  = {{ chart_closes  | tojson }};
+  const volumes = ({{ chart_volumes | tojson }}).map(v => v ?? 0);
+  const ma5     = calcMA(closes, 5);
+  const ma25    = calcMA(closes, 25);
+  const positiveVols = volumes.filter(v => Number.isFinite(v) && v > 0);
+  const maxVol = positiveVols.length ? Math.max(...positiveVols) : 1;
+
+  new Chart(document.getElementById('priceChart'), {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: '出来高',
+          data: volumes,
+          backgroundColor: 'rgba(108,117,125,0.25)',
+          yAxisID: 'vol',
+          order: 3,
+        },
+        {
+          type: 'line',
+          label: '終値',
+          data: closes,
+          borderColor: '#0d6efd',
+          backgroundColor: 'rgba(13,110,253,0.06)',
+          borderWidth: 2,
+          tension: 0.3,
+          fill: true,
+          pointRadius: 2,
+          yAxisID: 'price',
+          order: 1,
+        },
+        {
+          type: 'line',
+          label: 'MA5',
+          data: ma5,
+          borderColor: '#fd7e14',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          spanGaps: true,
+          yAxisID: 'price',
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: 'MA25',
+          data: ma25,
+          borderColor: '#dc3545',
+          borderWidth: 1.5,
+          borderDash: [5, 3],
+          pointRadius: 0,
+          tension: 0.3,
+          spanGaps: true,
+          yAxisID: 'price',
+          order: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.label === '出来高') {
+                return `出来高: ${ctx.parsed.y?.toLocaleString('ja-JP')}`;
+              }
+              return `${ctx.dataset.label}: ${ctx.parsed.y?.toLocaleString('ja-JP')}円`;
+            },
+          },
+        },
+      },
+      scales: {
+        price: {
+          type: 'linear',
+          position: 'left',
+          ticks: { callback: v => v?.toLocaleString('ja-JP') + '円' },
+        },
+        vol: {
+          type: 'linear',
+          position: 'right',
+          suggestedMax: maxVol * 5,
+          grid: { display: false },
+          ticks: { display: false },
+        },
+        x: {
+          ticks: { maxTicksLimit: 10 },
+        },
+      },
+    },
+  });
+}());
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}{{ signal_label }}候補 ({{ strategy_label }}) - 株売買支援システム{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+  <div class="col">
+    <h2>
+      {% if signal == 'buy' %}<i class="bi bi-arrow-up-circle text-success"></i>
+      {% elif signal == 'sell' %}<i class="bi bi-arrow-down-circle text-danger"></i>
+      {% else %}<i class="bi bi-dash-circle text-secondary"></i>{% endif %}
+      {{ signal_label }}候補一覧 <small class="text-muted fs-5">{{ strategy_label }}</small>
+    </h2>
+  </div>
+</div>
+
+<!-- フィルタフォーム -->
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <form method="get" action="/candidates" class="row g-2 align-items-end">
+      <div class="col-12 col-sm-auto">
+        <label class="form-label small mb-1">戦略</label>
+        <select name="strategy" class="form-select form-select-sm">
+          <option value="swing" {% if strategy=='swing' %}selected{% endif %}>短期（スイング）</option>
+          <option value="fundamental" {% if strategy=='fundamental' %}selected{% endif %}>中長期（ファンダ）</option>
+          <option value="dividend" {% if strategy=='dividend' %}selected{% endif %}>配当重視</option>
+        </select>
+      </div>
+      <div class="col-12 col-sm-auto">
+        <label class="form-label small mb-1">シグナル</label>
+        <select name="signal" class="form-select form-select-sm">
+          <option value="buy" {% if signal=='buy' %}selected{% endif %}>買い</option>
+          <option value="sell" {% if signal=='sell' %}selected{% endif %}>売り</option>
+          <option value="hold" {% if signal=='hold' %}selected{% endif %}>様子見</option>
+        </select>
+      </div>
+      <div class="col-6 col-sm-auto">
+        <label class="form-label small mb-1">価格下限（円）</label>
+        <input type="number" name="price_min" class="form-control form-control-sm" placeholder="例: 1000"
+               value="{{ price_min if price_min is not none else '' }}">
+      </div>
+      <div class="col-6 col-sm-auto">
+        <label class="form-label small mb-1">価格上限（円）</label>
+        <input type="number" name="price_max" class="form-control form-control-sm" placeholder="例: 5000"
+               value="{{ price_max if price_max is not none else '' }}">
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-sm btn-primary">
+          <i class="bi bi-search"></i> 絞り込み
+        </button>
+        <a href="/candidates?strategy={{ strategy }}&signal={{ signal }}" class="btn btn-sm btn-outline-secondary ms-1">
+          <i class="bi bi-x-circle"></i> リセット
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 価格帯クイックフィルタ -->
+<div class="d-flex gap-2 flex-wrap mb-3 align-items-center">
+  <span class="text-muted small">価格帯:</span>
+  <a href="/candidates?strategy={{ strategy }}&signal={{ signal }}&price_max=1000" class="btn btn-sm btn-outline-secondary">〜1,000円</a>
+  <a href="/candidates?strategy={{ strategy }}&signal={{ signal }}&price_min=1000&price_max=3000" class="btn btn-sm btn-outline-secondary">1,000〜3,000円</a>
+  <a href="/candidates?strategy={{ strategy }}&signal={{ signal }}&price_min=3000&price_max=10000" class="btn btn-sm btn-outline-secondary">3,000〜10,000円</a>
+  <a href="/candidates?strategy={{ strategy }}&signal={{ signal }}&price_min=10000" class="btn btn-sm btn-outline-secondary">10,000円〜</a>
+</div>
+
+{% if error %}
+<div class="alert alert-warning mb-3">
+  <i class="bi bi-exclamation-triangle"></i> {{ error }}
+</div>
+{% endif %}
+
+<!-- 結果テーブル -->
+{% if results %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <span class="text-muted small"><strong>{{ results|length }}</strong> 銘柄ヒット</span>
+  <span class="text-muted small"><i class="bi bi-arrow-down-up"></i> 列ヘッダーをクリックで並び替え</span>
+</div>
+<div class="table-responsive">
+  <table class="table table-hover table-sm align-middle sortable-table" id="candidatesTable">
+    <thead class="table-dark">
+      <tr>
+        <th class="sortable" data-col="0" role="button" tabindex="0" aria-sort="none">銘柄コード</th>
+        <th class="sortable" data-col="1" role="button" tabindex="0" aria-sort="none">銘柄名</th>
+        <th class="sortable text-end" data-col="2" role="button" tabindex="0" aria-sort="none">現在値</th>
+        <th class="text-center">シグナル</th>
+        <th class="sortable text-center" data-col="4" role="button" tabindex="0" aria-sort="none">スコア</th>
+        <th>主な判定理由</th>
+        <th class="sortable" data-col="6" role="button" tabindex="0" aria-sort="none">データ時点</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td><code>{{ r.code }}</code></td>
+        <td>
+          <a href="/stock/{{ r.code }}" class="link-primary text-decoration-none fw-semibold">{{ r.name }}</a>
+        </td>
+        <td class="text-end" data-value="{{ r.price or 0 }}">
+          {% if r.price %}{{ "{:,.0f}".format(r.price) }}円{% else %}—{% endif %}
+        </td>
+        <td class="text-center">
+          {% if r.signal == 'buy' %}
+            <span class="badge bg-success"><i class="bi bi-arrow-up"></i> 買い</span>
+          {% elif r.signal == 'sell' %}
+            <span class="badge bg-danger"><i class="bi bi-arrow-down"></i> 売り</span>
+          {% else %}
+            <span class="badge bg-secondary">様子見</span>
+          {% endif %}
+        </td>
+        <td class="text-center" data-value="{{ r.score }}">
+          <div class="d-flex align-items-center gap-1">
+            <div class="progress flex-fill" style="height: 16px; min-width: 60px;">
+              <div class="progress-bar {% if r.score >= 0.7 %}bg-success{% elif r.score >= 0.5 %}bg-warning{% else %}bg-danger{% endif %}"
+                   style="width: {{ (r.score * 100)|int }}%"></div>
+            </div>
+            <span class="small text-nowrap">{{ "{:.0f}".format(r.score * 100) }}%</span>
+          </div>
+        </td>
+        <td class="text-muted small">{{ r.top_reason }}</td>
+        <td class="text-muted small text-nowrap">{{ r.as_of }}</td>
+        <td>
+          <a href="/stock/{{ r.code }}" class="btn btn-sm btn-outline-primary"
+             aria-label="{{ r.name }}（{{ r.code }}）の詳細を表示" title="詳細を表示">
+            <i class="bi bi-search" aria-hidden="true"></i>
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif not error %}
+<div class="alert alert-warning">
+  <i class="bi bi-info-circle"></i>
+  現在の条件に合致する銘柄が見つかりませんでした。
+  <a href="/" class="alert-link">ダッシュボードに戻る</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,120 @@
+/* 株売買支援システム - カスタムスタイル */
+
+body {
+  background-color: #f8f9fa;
+  font-family: 'Segoe UI', 'Yu Gothic', sans-serif;
+}
+
+.navbar-brand {
+  font-size: 1.05rem;
+}
+
+/* アクティブなナビリンク */
+.navbar .nav-link.active {
+  background-color: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.card {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+}
+
+.card-header {
+  font-weight: 600;
+}
+
+.display-6 {
+  font-size: 2rem;
+}
+
+/* ダッシュボードサマリーの件数・ラベル（0件でも高さを確保） */
+.summary-count {
+  min-height: 2.4rem;
+  line-height: 1.2;
+}
+.summary-label {
+  min-height: 1.2rem;
+}
+
+.table th {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+/* シグナルバッジ */
+.signal-buy  { color: #198754; }
+.signal-sell { color: #dc3545; }
+.signal-hold { color: #6c757d; }
+
+/* プログレスバー */
+.progress {
+  border-radius: 4px;
+}
+
+/* ルール判定テーブル */
+.table-success td, .table-success th {
+  background-color: rgba(25, 135, 84, 0.07);
+}
+.table-danger td, .table-danger th {
+  background-color: rgba(220, 53, 69, 0.07);
+}
+
+/* チャートコンテナ */
+canvas {
+  max-height: 320px;
+}
+
+/* チャート凡例ドット */
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* ソート可能テーブル */
+.sortable-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.sortable-table th.sortable:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+.sortable-table th.sort-asc::after  { content: ' ▲'; font-size: 0.75em; }
+.sortable-table th.sort-desc::after { content: ' ▼'; font-size: 0.75em; }
+
+/* ニュースカード */
+.news-card {
+  border: 1px solid #dee2e6;
+  border-left-width: 5px;
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  background: #fff;
+}
+
+.news-positive { border-left-color: #198754; }
+.news-negative { border-left-color: #dc3545; }
+.news-neutral  { border-left-color: #6c757d; }
+
+.news-title {
+  color: #212529;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+.news-title:hover { text-decoration: underline; color: #0d6efd; }
+
+.news-summary {
+  margin-top: 0.4rem;
+  color: #495057;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.news-score {
+  font-size: 0.8rem;
+  min-width: 52px;
+  text-align: center;
+}
