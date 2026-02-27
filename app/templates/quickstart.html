@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}引け前仕込み - 株売買支援システム{% endblock %}
+
+{% block content %}
+<div class="row mb-3 align-items-center">
+  <div class="col">
+    <h2>
+      <i class="bi bi-lightning-charge text-warning"></i>
+      ギャップアップ引け前仕込み
+      <small class="text-muted fs-6">{{ trade_date }}</small>
+    </h2>
+  </div>
+  <div class="col-auto text-muted small">
+    スケジュール: 14:50 抽出 → 15:00–15:15 生存テスト → 15:05–14 エントリー → 翌朝9:00–9:30 決済
+  </div>
+</div>
+
+<!-- 手動実行ボタン -->
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <span class="text-muted small me-3"><i class="bi bi-hand-index"></i> 手動実行:</span>
+    <button class="btn btn-sm btn-outline-primary me-1" onclick="runJob('candidate_scan')">
+      <i class="bi bi-search"></i> 候補抽出
+    </button>
+    <button class="btn btn-sm btn-outline-warning me-1" onclick="runJob('survival_test')">
+      <i class="bi bi-shield-check"></i> 生存テスト
+    </button>
+    <button class="btn btn-sm btn-outline-success me-1" onclick="runJob('entry_signal')">
+      <i class="bi bi-arrow-up-circle"></i> エントリー
+    </button>
+    <button class="btn btn-sm btn-outline-danger me-1" onclick="runJob('exit_signal')">
+      <i class="bi bi-arrow-down-circle"></i> 決済
+    </button>
+    <span id="job-status" class="ms-2 small"></span>
+  </div>
+</div>
+
+<!-- タブ -->
+<ul class="nav nav-tabs mb-3" id="qsTabs">
+  <li class="nav-item">
+    <a class="nav-link active" data-bs-toggle="tab" href="#tab-candidates">
+      <i class="bi bi-list-ul"></i> 候補
+      <span class="badge bg-secondary ms-1">{{ candidates|length }}</span>
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" data-bs-toggle="tab" href="#tab-signals">
+      <i class="bi bi-bell"></i> シグナル
+      <span class="badge bg-primary ms-1">{{ signals|length }}</span>
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" data-bs-toggle="tab" href="#tab-positions">
+      <i class="bi bi-briefcase"></i> ポジション
+      <span class="badge bg-{% if open_positions %}warning{% else %}secondary{% endif %} ms-1">{{ open_positions|length }}</span>
+    </a>
+  </li>
+</ul>
+
+<div class="tab-content">
+
+  <!-- 候補タブ -->
+  <div class="tab-pane fade show active" id="tab-candidates">
+    {% if candidates %}
+    <div class="table-responsive">
+      <table class="table table-hover table-sm align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>銘柄コード</th>
+            <th class="text-end">ギャップアップ率</th>
+            <th class="text-end">出来高比</th>
+            <th class="text-end">高値からの押し</th>
+            <th class="text-end">最新値</th>
+            <th class="text-center">状態</th>
+            <th>除外理由</th>
+            <th>更新時刻</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in candidates %}
+          <tr>
+            <td><code><a href="/stock/{{ r.code }}" class="link-primary text-decoration-none">{{ r.code }}</a></code></td>
+            <td class="text-end fw-bold {% if r.gap_up_rate >= 0.15 %}text-success{% endif %}">
+              +{{ "%.1f"|format(r.gap_up_rate * 100) }}%
+            </td>
+            <td class="text-end">{{ "%.1f"|format(r.volume_ratio) }}x</td>
+            <td class="text-end">{{ "%.1f"|format(r.high_distance * 100) }}%</td>
+            <td class="text-end">{{ "{:,.0f}".format(r.latest_price) }}円</td>
+            <td class="text-center">
+              {% if r.status == 'alive' %}
+                <span class="badge bg-success"><i class="bi bi-check-circle"></i> alive</span>
+              {% elif r.status == 'picked' %}
+                <span class="badge bg-primary"><i class="bi bi-hourglass-split"></i> 観察中</span>
+              {% else %}
+                <span class="badge bg-secondary"><i class="bi bi-x-circle"></i> 除外</span>
+              {% endif %}
+            </td>
+            <td class="text-muted small">{{ r.reject_reason or "—" }}</td>
+            <td class="text-muted small text-nowrap">{{ r.updated_at[11:19] if r.updated_at else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle"></i>
+      本日の候補がまだありません。スケジューラが14:50に自動抽出します。
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- シグナルタブ -->
+  <div class="tab-pane fade" id="tab-signals">
+    {% if signals %}
+    <div class="table-responsive">
+      <table class="table table-hover table-sm align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>時刻</th>
+            <th>銘柄コード</th>
+            <th class="text-center">売買</th>
+            <th class="text-center">種別</th>
+            <th class="text-end">価格</th>
+            <th>理由</th>
+            <th class="text-center">状態</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in signals %}
+          <tr>
+            <td class="text-muted small text-nowrap">{{ s.ts_jst[11:19] if s.ts_jst else "—" }}</td>
+            <td><code><a href="/stock/{{ s.code }}" class="link-primary text-decoration-none">{{ s.code }}</a></code></td>
+            <td class="text-center">
+              {% if s.side == 'buy' %}
+                <span class="badge bg-success"><i class="bi bi-arrow-up"></i> 買い</span>
+              {% else %}
+                <span class="badge bg-danger"><i class="bi bi-arrow-down"></i> 売り</span>
+              {% endif %}
+            </td>
+            <td class="text-center">
+              <span class="badge bg-{% if s.signal_type == 'entry' %}primary{% else %}warning text-dark{% endif %}">
+                {{ s.signal_type }}
+              </span>
+            </td>
+            <td class="text-end">{{ "{:,.0f}".format(s.price) }}円</td>
+            <td class="text-muted small">{{ s.reason }}</td>
+            <td class="text-center">
+              <span class="badge bg-{% if s.status == 'new' %}info text-dark{% else %}secondary{% endif %}">
+                {{ s.status }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle"></i>
+      本日のシグナルがまだありません。
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ポジションタブ -->
+  <div class="tab-pane fade" id="tab-positions">
+    {% if open_positions %}
+    <h6 class="text-warning mb-2"><i class="bi bi-clock"></i> オープン</h6>
+    <div class="table-responsive mb-4">
+      <table class="table table-hover table-sm align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>銘柄コード</th>
+            <th>エントリー日時</th>
+            <th class="text-end">エントリー価格</th>
+            <th class="text-end">配分</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in open_positions %}
+          <tr>
+            <td><code><a href="/stock/{{ p.code }}" class="link-primary text-decoration-none">{{ p.code }}</a></code></td>
+            <td class="text-muted small text-nowrap">{{ p.entry_ts_jst[0:19] if p.entry_ts_jst else "—" }}</td>
+            <td class="text-end">{{ "{:,.0f}".format(p.entry_price) }}円</td>
+            <td class="text-end">{{ "%.0f"|format(p.allocation_pct * 100) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if closed_positions %}
+    <h6 class="text-secondary mb-2"><i class="bi bi-check2-circle"></i> 決済済み</h6>
+    <div class="table-responsive">
+      <table class="table table-hover table-sm align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>銘柄コード</th>
+            <th>エントリー</th>
+            <th>決済</th>
+            <th class="text-end">エントリー価格</th>
+            <th class="text-end">決済価格</th>
+            <th class="text-end">損益率</th>
+            <th>決済理由</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in closed_positions %}
+          {% set pnl = (p.exit_price / p.entry_price - 1) * 100 if p.exit_price and p.entry_price else None %}
+          <tr>
+            <td><code><a href="/stock/{{ p.code }}" class="link-primary text-decoration-none">{{ p.code }}</a></code></td>
+            <td class="text-muted small text-nowrap">{{ p.entry_ts_jst[0:19] if p.entry_ts_jst else "—" }}</td>
+            <td class="text-muted small text-nowrap">{{ p.exit_ts_jst[0:19] if p.exit_ts_jst else "—" }}</td>
+            <td class="text-end">{{ "{:,.0f}".format(p.entry_price) }}円</td>
+            <td class="text-end">{{ "{:,.0f}".format(p.exit_price) if p.exit_price else "—" }}{% if p.exit_price %}円{% endif %}</td>
+            <td class="text-end fw-bold {% if pnl is not none %}{% if pnl >= 0 %}text-success{% else %}text-danger{% endif %}{% endif %}">
+              {% if pnl is not none %}
+                {{ "%.1f"|format(pnl) }}%
+              {% else %}—{% endif %}
+            </td>
+            <td class="text-muted small">{{ p.exit_reason or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if not open_positions and not closed_positions %}
+    <div class="alert alert-info">
+      <i class="bi bi-info-circle"></i>
+      ポジションがありません。
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function runJob(job) {
+  const el = document.getElementById('job-status');
+  el.innerHTML = '<span class="text-warning"><i class="bi bi-hourglass-split"></i> 実行中...</span>';
+  try {
+    const res = await fetch(`/api/quickstart/run/${job}`, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      el.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + data.message + '</span>';
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      el.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> ' + (data.detail || 'エラー') + '</span>';
+    }
+  } catch (e) {
+    el.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> 通信エラー</span>';
+  }
+}
+</script>
+{% endblock %}

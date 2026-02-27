@@ -6,6 +6,8 @@ BASE_DIR = Path(__file__).parent.parent
 
 class Settings(BaseSettings):
     edinet_api_key: str = ""
+    db_path: str = str(BASE_DIR / "local.db")
+    sentiment_mode: str = "rule"  # rule | hybrid | model
 
     class Config:
         env_file = str(BASE_DIR / ".env")

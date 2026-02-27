@@ -11,20 +11,12 @@ from urllib.parse import quote_plus
 
 import requests
 
+from .config import settings
+from .sentiment import score_hybrid
+
 DEFAULT_LOOKBACK_DAYS = 30
 DEFAULT_LIMIT = 10
 HTTP_TIMEOUT = 12
-
-POSITIVE_KEYWORDS: dict[str, float] = {
-    "増益": 0.9, "上方修正": 0.9, "最高益": 1.0, "好決算": 0.8, "増配": 0.8, "受注増": 0.6,
-    "成長": 0.5, "提携": 0.4, "買収": 0.3, "upgrade": 0.5, "beat": 0.6, "outperform": 0.6,
-    "record profit": 1.0, "dividend increase": 0.8,
-}
-NEGATIVE_KEYWORDS: dict[str, float] = {
-    "減益": 0.9, "下方修正": 0.9, "赤字": 1.0, "減配": 0.8, "業績悪化": 0.8, "不祥事": 0.8,
-    "訴訟": 0.7, "リコール": 0.7, "downgrade": 0.5, "miss": 0.6, "underperform": 0.6,
-    "loss": 0.8, "dividend cut": 0.9,
-}
 
 
 def _strip_html(text: str | None) -> str:
@@ -53,21 +45,6 @@ def _parse_dt(value: str | None) -> datetime | None:
 def _to_iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
-
-def _sentiment_score(title: str, summary: str) -> float:
-    """キーワードベースのセンチメントスコア（-1.0〜+1.0）を返す。"""
-    text = f"{title} {summary}".lower()
-    raw = 0.0
-    for k, w in POSITIVE_KEYWORDS.items():
-        if k in text:
-            raw += w
-    for k, w in NEGATIVE_KEYWORDS.items():
-        if k in text:
-            raw -= w
-    score = max(-1.0, min(1.0, raw / 3.0))
-    if abs(score) < 0.08:
-        return 0.0
-    return round(score, 3)
 
 
 def _fetch_rss(url: str, source_name: str) -> list[dict[str, Any]]:
@@ -158,11 +135,20 @@ def fetch_company_news(
     code: str,
     company_name: str,
     newsapi_key: str = "",
+    since: str | None = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     limit: int = DEFAULT_LIMIT,
 ) -> list[dict[str, Any]]:
-    """企業のニュースをRSS/NewsAPIから取得してセンチメントスコアを付与して返す。"""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    """企業のニュースをRSS/NewsAPIから取得してセンチメントスコアを付与して返す。
+
+    since: ISO日時文字列。指定時はその日時以降の記事のみ返す（watermark増分取得用）。
+           未指定時は lookback_days 日分を返す。
+    """
+    now = datetime.now(timezone.utc)
+    if since:
+        cutoff = _parse_dt(since) or (now - timedelta(days=lookback_days))
+    else:
+        cutoff = now - timedelta(days=lookback_days)
 
     raw: list[dict[str, Any]] = []
     raw.extend(_fetch_google_news(code, company_name))
@@ -180,13 +166,16 @@ def fetch_company_news(
         dt = _parse_dt(r["published_at"])
         if not dt or dt < cutoff:
             continue
-        score = _sentiment_score(r["title"], r.get("summary", ""))
+        s = score_hybrid(r["title"], r.get("summary", ""), mode=settings.sentiment_mode)
         filtered.append({
             "published_at": r["published_at"],
             "title": r["title"],
             "url": r["url"],
             "summary": r.get("summary", ""),
-            "sentiment_score": score,
+            "sentiment_score": s["score"],
+            "sentiment_method": s["method"],
+            "sentiment_model": s["model_version"],
+            "sentiment_confidence": s["confidence"],
             "source": r.get("source", "unknown"),
         })
 

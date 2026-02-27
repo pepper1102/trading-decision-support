@@ -6,8 +6,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
-DB_PATH = Path(__file__).resolve().parent.parent / "local.db"
+from .config import settings
+
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.sql"
+DB_PATH = Path(settings.db_path).expanduser().resolve()
 
 
 def get_conn() -> sqlite3.Connection:
@@ -18,6 +20,38 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _migrate_db(conn: sqlite3.Connection) -> None:
+    """既存DBへの後方互換カラム追加（エラー無視）。
+    schema.sql は CREATE TABLE IF NOT EXISTS 形式のため、
+    既存テーブルへのカラム追加はここで行う。
+    """
+    migrations = [
+        # Fix4: source/source_version/ingested_at
+        "ALTER TABLE daily_quotes ADD COLUMN source TEXT",
+        "ALTER TABLE daily_quotes ADD COLUMN source_version TEXT",
+        "ALTER TABLE daily_quotes ADD COLUMN ingested_at TEXT",
+        "ALTER TABLE statements ADD COLUMN source TEXT",
+        "ALTER TABLE statements ADD COLUMN source_version TEXT",
+        "ALTER TABLE statements ADD COLUMN ingested_at TEXT",
+        "ALTER TABLE dividends ADD COLUMN source TEXT",
+        "ALTER TABLE dividends ADD COLUMN source_version TEXT",
+        "ALTER TABLE dividends ADD COLUMN ingested_at TEXT",
+        "ALTER TABLE announcements ADD COLUMN source TEXT",
+        "ALTER TABLE announcements ADD COLUMN source_version TEXT",
+        "ALTER TABLE announcements ADD COLUMN ingested_at TEXT",
+        # Fix5: sentiment metadata
+        "ALTER TABLE news ADD COLUMN sentiment_method TEXT DEFAULT 'rule'",
+        "ALTER TABLE news ADD COLUMN sentiment_model TEXT",
+        "ALTER TABLE news ADD COLUMN sentiment_confidence REAL",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass  # カラムが既に存在する場合は無視
+    conn.commit()
+
+
 def init_db() -> None:
     """schema.sqlを読み込んでテーブルを初期化し、WALモードを有効化する。"""
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
@@ -25,6 +59,7 @@ def init_db() -> None:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(schema_sql)
+        _migrate_db(conn)
         conn.commit()
 
 
@@ -93,11 +128,62 @@ def statements_need_refresh(code: str, max_age_days: int = 30) -> bool:
 
 
 def read_statements_from_db(code: str) -> list[dict[str, Any]]:
-    """DBからstatements（raw_json）を読み込んでdictリストで返す。"""
+    """DBからstatementsを読み込んでdictリストで返す（明示列優先、raw_jsonフォールバック）。"""
     with sqlite3.connect(str(DB_PATH)) as conn:
         conn.execute("PRAGMA busy_timeout=5000")
         rows = conn.execute(
-            "SELECT raw_json FROM statements WHERE code = ? ORDER BY disclosed_date DESC",
+            """SELECT disclosed_date, net_sales, operating_profit, equity,
+                      total_assets, net_income, eps, raw_json
+               FROM statements WHERE code = ? ORDER BY disclosed_date DESC""",
             (code,),
         ).fetchall()
-    return [json.loads(r[0]) for r in rows if r[0]]
+    result: list[dict[str, Any]] = []
+    for r in rows:
+        row_dict: dict[str, Any] = {
+            "DisclosedDate": r[0],
+            "NetSales": r[1],
+            "OperatingProfit": r[2],
+            "Equity": r[3],
+            "TotalAssets": r[4],
+            "NetIncome": r[5],
+            "EarningsPerShare": r[6],
+        }
+        # 明示列が全てNoneの場合はraw_jsonから復元を試みる
+        if all(v is None for k, v in row_dict.items() if k != "DisclosedDate") and r[7]:
+            try:
+                row_dict = json.loads(r[7])
+            except json.JSONDecodeError:
+                pass
+        result.append(row_dict)
+    return result
+
+
+# ──────────────────────────────────────────────
+# Watermark（銘柄・フィード別の最終取得済み公開日時）
+# ──────────────────────────────────────────────
+
+def get_watermark(code: str, feed: str) -> str | None:
+    """銘柄・フィードの最終取得済み公開日時を返す（なければNone）。"""
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        conn.execute("PRAGMA busy_timeout=5000")
+        row = conn.execute(
+            "SELECT last_published_at FROM ingest_watermarks WHERE code = ? AND feed = ?",
+            (code, feed),
+        ).fetchone()
+    return row[0] if row else None
+
+
+def upsert_watermark(code: str, feed: str, last_published_at: str) -> None:
+    """銘柄・フィードのwatermarkをUPSERTする。"""
+    now = datetime.now().isoformat(timespec="seconds")
+    with sqlite3.connect(str(DB_PATH)) as conn:
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute(
+            """INSERT INTO ingest_watermarks (code, feed, last_published_at, last_ingested_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(code, feed) DO UPDATE SET
+                 last_published_at=excluded.last_published_at,
+                 last_ingested_at=excluded.last_ingested_at""",
+            (code, feed, last_published_at, now),
+        )
+        conn.commit()

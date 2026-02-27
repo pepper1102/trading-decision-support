@@ -23,10 +23,12 @@ from app.db import (
     DB_PATH,
     get_conn,
     get_db_edinet_code,
+    get_watermark,
     init_db,
     read_statements_from_db,
     save_edinet_code_cache,
     statements_need_refresh,
+    upsert_watermark,
 )
 from app.rules.engine import RulesOrchestrator
 
@@ -242,47 +244,64 @@ def upsert_stock(conn: Any, code: str, info: dict[str, Any]) -> None:
     )
 
 
-def upsert_daily_quotes(conn: Any, code: str, quotes: list[dict[str, Any]]) -> None:
+def upsert_daily_quotes(
+    conn: Any, code: str, quotes: list[dict[str, Any]], source: str = "yfinance"
+) -> None:
+    ts = now_iso()
     for q in quotes:
         d = normalize_date(q.get("Date"))
         if not d:
             continue
         conn.execute(
-            """INSERT INTO daily_quotes (code, date, open, high, low, close, volume, turnover_value, raw_json, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO daily_quotes
+                 (code, date, open, high, low, close, volume, turnover_value,
+                  raw_json, updated_at, source, source_version, ingested_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(code, date) DO UPDATE SET
                  open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close,
                  volume=excluded.volume, turnover_value=excluded.turnover_value,
-                 raw_json=excluded.raw_json, updated_at=excluded.updated_at""",
+                 raw_json=excluded.raw_json, updated_at=excluded.updated_at,
+                 source=excluded.source, source_version=excluded.source_version,
+                 ingested_at=excluded.ingested_at""",
             (code, d, to_float(q.get("Open")), to_float(q.get("High")), to_float(q.get("Low")),
              to_float(q.get("Close")), to_float(q.get("Volume")), to_float(q.get("TurnoverValue")),
-             json.dumps(q, ensure_ascii=False), now_iso()),
+             json.dumps(q, ensure_ascii=False), ts, source, "v1", ts),
         )
 
 
-def upsert_statements(conn: Any, code: str, statements: list[dict[str, Any]]) -> None:
+def upsert_statements(
+    conn: Any, code: str, statements: list[dict[str, Any]], source: str = "yfinance"
+) -> None:
+    ts = now_iso()
     for st in statements:
         disclosed_date = normalize_date(st.get("DisclosedDate"))
         if not disclosed_date:
             continue
         net_sales = to_float(st.get("NetSales") or st.get("NetSalesAmount") or st.get("Revenue"))
         conn.execute(
-            """INSERT INTO statements (code, disclosed_date, net_sales, operating_profit, equity, total_assets, net_income, eps, raw_json, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO statements
+                 (code, disclosed_date, net_sales, operating_profit, equity, total_assets,
+                  net_income, eps, raw_json, updated_at, source, source_version, ingested_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(code, disclosed_date) DO UPDATE SET
                  net_sales=excluded.net_sales, operating_profit=excluded.operating_profit,
                  equity=excluded.equity, total_assets=excluded.total_assets,
                  net_income=excluded.net_income, eps=excluded.eps,
-                 raw_json=excluded.raw_json, updated_at=excluded.updated_at""",
+                 raw_json=excluded.raw_json, updated_at=excluded.updated_at,
+                 source=excluded.source, source_version=excluded.source_version,
+                 ingested_at=excluded.ingested_at""",
             (code, disclosed_date, net_sales, to_float(st.get("OperatingProfit")),
              to_float(st.get("Equity")), to_float(st.get("TotalAssets")),
              to_float(st.get("NetIncome")),
              to_float(st.get("EarningsPerShare") or st.get("BasicEarningsPerShare") or st.get("EPS")),
-             json.dumps(st, ensure_ascii=False), now_iso()),
+             json.dumps(st, ensure_ascii=False), ts, source, "v1", ts),
         )
 
 
-def upsert_dividends(conn: Any, code: str, dividends: list[dict[str, Any]]) -> None:
+def upsert_dividends(
+    conn: Any, code: str, dividends: list[dict[str, Any]], source: str = "yfinance"
+) -> None:
+    ts = now_iso()
     for d in dividends:
         record_date = normalize_date(d.get("RecordDate") or d.get("Date"))
         if not record_date:
@@ -292,32 +311,46 @@ def upsert_dividends(conn: Any, code: str, dividends: list[dict[str, Any]]) -> N
             or d.get("AnnualDividendPerShare") or d.get("Dividend")
         )
         conn.execute(
-            """INSERT INTO dividends (code, record_date, dividend_per_share, raw_json, updated_at)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO dividends
+                 (code, record_date, dividend_per_share, raw_json, updated_at,
+                  source, source_version, ingested_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(code, record_date) DO UPDATE SET
                  dividend_per_share=excluded.dividend_per_share,
-                 raw_json=excluded.raw_json, updated_at=excluded.updated_at""",
-            (code, record_date, amount, json.dumps(d, ensure_ascii=False), now_iso()),
+                 raw_json=excluded.raw_json, updated_at=excluded.updated_at,
+                 source=excluded.source, source_version=excluded.source_version,
+                 ingested_at=excluded.ingested_at""",
+            (code, record_date, amount, json.dumps(d, ensure_ascii=False), ts, source, "v1", ts),
         )
 
 
-def upsert_announcements(conn: Any, announcements: list[dict[str, Any]]) -> int:
+def upsert_announcements(
+    conn: Any, announcements: list[dict[str, Any]], source: str = "yfinance"
+) -> int:
     count = 0
+    ts = now_iso()
     for a in announcements:
         code = str(a.get("Code") or a.get("LocalCode") or "").strip()
         d = normalize_date(a.get("Date") or a.get("AnnouncementDate") or a.get("DisclosedDate"))
         if not code or not d:
             continue
         conn.execute(
-            """INSERT INTO announcements (code, date, raw_json, updated_at) VALUES (?, ?, ?, ?)
-               ON CONFLICT(code, date) DO UPDATE SET raw_json=excluded.raw_json, updated_at=excluded.updated_at""",
-            (code, d, json.dumps(a, ensure_ascii=False), now_iso()),
+            """INSERT INTO announcements
+                 (code, date, raw_json, updated_at, source, source_version, ingested_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(code, date) DO UPDATE SET
+                 raw_json=excluded.raw_json, updated_at=excluded.updated_at,
+                 source=excluded.source, source_version=excluded.source_version,
+                 ingested_at=excluded.ingested_at""",
+            (code, d, json.dumps(a, ensure_ascii=False), ts, source, "v1", ts),
         )
         count += 1
     return count
 
 
-def upsert_news(conn: Any, code: str, news_rows: list[dict[str, Any]]) -> None:
+def upsert_news(conn: Any, code: str, news_rows: list[dict[str, Any]]) -> str | None:
+    """ニュースをDBにUPSERT。挿入したニュースの最大 published_at を返す（watermark用）。"""
+    max_pub: str | None = None
     for n in news_rows:
         published_at = str(n.get("published_at") or "").strip()
         title = str(n.get("title") or "").strip()
@@ -325,19 +358,30 @@ def upsert_news(conn: Any, code: str, news_rows: list[dict[str, Any]]) -> None:
         summary = str(n.get("summary") or "").strip()
         source = str(n.get("source") or "unknown").strip()
         score = to_float(n.get("sentiment_score")) or 0.0
+        method = str(n.get("sentiment_method") or "rule").strip()
+        model = n.get("sentiment_model")
+        confidence = to_float(n.get("sentiment_confidence"))
         if not (published_at and title and url):
             continue
         conn.execute(
-            """INSERT INTO news (code, published_at, title, url, summary, sentiment_score, source)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO news
+                 (code, published_at, title, url, summary, sentiment_score, source,
+                  sentiment_method, sentiment_model, sentiment_confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(code, url) DO UPDATE SET
                  published_at=excluded.published_at,
                  title=excluded.title,
                  summary=excluded.summary,
                  sentiment_score=excluded.sentiment_score,
-                 source=excluded.source""",
-            (code, published_at, title, url, summary, score, source),
+                 source=excluded.source,
+                 sentiment_method=excluded.sentiment_method,
+                 sentiment_model=excluded.sentiment_model,
+                 sentiment_confidence=excluded.sentiment_confidence""",
+            (code, published_at, title, url, summary, score, source, method, model, confidence),
         )
+        if max_pub is None or published_at > max_pub:
+            max_pub = published_at
+    return max_pub
 
 
 def upsert_judgments(conn: Any, batch_run_id: int, code: str, judgments: dict[str, Any]) -> None:
@@ -457,15 +501,17 @@ def fetch_stock(
     # ── ニュース取得（Google News RSS / Yahoo Finance RSS / NewsAPI） ──
     news: list[dict[str, Any]] = []
     try:
+        news_since = get_watermark(code, "news")
         news = fetch_company_news(
             code=code,
             company_name=name,
             newsapi_key=newsapi_key,
+            since=news_since,
             lookback_days=30,
             limit=10,
         )
         if news:
-            logging.info("  %s: %d news items fetched", code, len(news))
+            logging.info("  %s: %d news items fetched (since=%s)", code, len(news), news_since)
     except Exception:
         logging.exception("  %s: news fetch failed (continuing)", code)
 
@@ -507,14 +553,18 @@ def writer_loop(q: Queue, batch_run_id: int) -> None:
                 break
             try:
                 upsert_stock(conn, item.code, item.listed_info)
-                upsert_daily_quotes(conn, item.code, item.quotes)
+                upsert_daily_quotes(conn, item.code, item.quotes, source="yfinance")
                 # EDINETから新規取得した場合のみupdated_atを更新（30日キャッシュのため）
                 if item.edinet_fetched or not item.statements:
-                    upsert_statements(conn, item.code, item.statements)
-                upsert_dividends(conn, item.code, item.dividends)
-                upsert_news(conn, item.code, item.news)
+                    stmt_source = "edinetdb" if item.edinet_fetched else "yfinance"
+                    upsert_statements(conn, item.code, item.statements, source=stmt_source)
+                upsert_dividends(conn, item.code, item.dividends, source="yfinance")
+                max_pub = upsert_news(conn, item.code, item.news)
                 upsert_judgments(conn, batch_run_id, item.code, item.judgments)
                 conn.commit()
+                # ニュースwatermarkを更新（commitの後）
+                if max_pub:
+                    upsert_watermark(item.code, "news", max_pub)
                 logging.info("  %s: saved to DB", item.code)
             except Exception:
                 conn.rollback()

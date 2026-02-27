@@ -148,6 +148,38 @@ async def stock_detail(request: Request, code: str):
 # JSONエンドポイント
 # ──────────────────────────────────────────────
 
+_JOB_MAP = {
+    "candidate_scan": None,
+    "survival_test": None,
+    "entry_signal": None,
+    "exit_signal": None,
+}
+
+@app.post("/api/quickstart/run/{job}")
+async def api_quickstart_run(job: str):
+    """クイックスタートジョブを手動実行する。"""
+    from .quickstart_jobs import (
+        run_candidate_scan, run_survival_test, run_entry_signal, run_exit_signal,
+    )
+    import asyncio
+    jobs = {
+        "candidate_scan": run_candidate_scan,
+        "survival_test": run_survival_test,
+        "entry_signal": run_entry_signal,
+        "exit_signal": run_exit_signal,
+    }
+    if job not in jobs:
+        raise HTTPException(status_code=404, detail=f"不明なジョブ: {job}")
+    await asyncio.to_thread(jobs[job])
+    labels = {
+        "candidate_scan": "候補抽出",
+        "survival_test": "生存テスト",
+        "entry_signal": "エントリーシグナル",
+        "exit_signal": "決済シグナル",
+    }
+    return {"message": f"{labels[job]}を実行しました"}
+
+
 @app.get("/api/stock/{code}")
 async def api_stock(code: str):
     """銘柄の判定結果をJSON形式で返す。"""
@@ -155,6 +187,41 @@ async def api_stock(code: str):
     if run_id is None:
         raise HTTPException(status_code=503, detail="データがありません。batch.py を実行してください。")
     return get_stock_judgments(run_id, code)
+
+
+@app.get("/quickstart", response_class=HTMLResponse)
+async def quickstart(request: Request):
+    """引け前仕込み戦略ダッシュボード。"""
+    from zoneinfo import ZoneInfo
+    trade_date = __import__("datetime").datetime.now(tz=ZoneInfo("Asia/Tokyo")).date().isoformat()
+
+    with __import__("app.db", fromlist=["get_conn"]).get_conn() as conn:
+        candidates = conn.execute(
+            "SELECT * FROM qs_candidates WHERE trade_date=? ORDER BY gap_up_rate DESC",
+            (trade_date,),
+        ).fetchall()
+        signals = conn.execute(
+            "SELECT * FROM qs_order_signals WHERE trade_date=? ORDER BY ts_jst DESC",
+            (trade_date,),
+        ).fetchall()
+        open_positions = conn.execute(
+            "SELECT * FROM qs_positions WHERE state='open' ORDER BY entry_ts_jst DESC",
+        ).fetchall()
+        closed_positions = conn.execute(
+            "SELECT * FROM qs_positions WHERE state='closed' ORDER BY exit_ts_jst DESC LIMIT 50",
+        ).fetchall()
+
+    return templates.TemplateResponse(
+        "quickstart.html",
+        {
+            "request": request,
+            "trade_date": trade_date,
+            "candidates": candidates,
+            "signals": signals,
+            "open_positions": open_positions,
+            "closed_positions": closed_positions,
+        },
+    )
 
 
 # ──────────────────────────────────────────────
